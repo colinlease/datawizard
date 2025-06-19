@@ -87,24 +87,37 @@ if uploaded_file is not None:
             # Reset selected features in session state when a new file is uploaded
             st.session_state.selected_features = []
 
+            import pandas as pd
+            def detect_datetime_columns(df):
+                datetime_cols = []
+                for col in df.columns:
+                    if df[col].dtype == 'object' or df[col].dtype.name == 'string':
+                        try:
+                            parsed = pd.to_datetime(df[col], errors='raise', infer_datetime_format=True)
+                            if pd.api.types.is_datetime64_any_dtype(parsed):
+                                datetime_cols.append(col)
+                        except:
+                            continue
+                return datetime_cols
+
             inferred_types = {}
+            datetime_fields = detect_datetime_columns(df)
             for col in df.columns:
-                dtype = pd.api.types.infer_dtype(df[col], skipna=True)
-                if dtype in ["string", "categorical", "object"]:
-                    # Try parsing to datetime
-                    parsed_dates = pd.to_datetime(df[col], errors='coerce', infer_datetime_format=True)
-                    non_null_ratio = parsed_dates.notnull().mean()
-                    if non_null_ratio > 0.9:
-                        df[col] = parsed_dates
-                        inferred_types[col] = "datetime"
-                    else:
-                        inferred_types[col] = "categorical"
-                elif dtype in ["integer", "floating", "mixed-integer-float"]:
-                    inferred_types[col] = "numeric"
-                elif dtype.startswith("datetime"):
+                if col in datetime_fields:
+                    # Only convert object/string columns to datetime
+                    if df[col].dtype == 'object' or df[col].dtype.name == 'string':
+                        df[col] = pd.to_datetime(df[col], errors='coerce')
                     inferred_types[col] = "datetime"
                 else:
-                    inferred_types[col] = "other"
+                    dtype = pd.api.types.infer_dtype(df[col], skipna=True)
+                    if dtype in ["string", "categorical", "object"]:
+                        inferred_types[col] = "categorical"
+                    elif dtype in ["integer", "floating", "mixed-integer-float"]:
+                        inferred_types[col] = "numeric"
+                    elif dtype.startswith("datetime"):
+                        inferred_types[col] = "datetime"
+                    else:
+                        inferred_types[col] = "other"
 
             cleanliness_messages = evaluate_data_cleanliness(df, inferred_types)
 
@@ -124,9 +137,27 @@ if uploaded_file is not None:
 
             st.sidebar.markdown("---")
             st.sidebar.markdown("### File Summary")
-            if cleanliness_messages:
-                for msg in cleanliness_messages:
-                    st.sidebar.info(f"**Data Quality Check**\n\n{msg}")
+            # --- Data Quality Message Rendering (dynamic coloring) ---
+            dq_messages = cleanliness_messages
+            # Define mapping for positive/negative
+            dq_message_types = {}
+            # Mark positive messages
+            positive_msgs = [
+                "Dataset is extremely clean. No missing values, well-defined structure.",
+                "Dataset is clean with minor missing data. All columns appear well-defined.",
+                "Likely time-series data detected. Datetime structure parsed successfully."
+            ]
+            for m in dq_messages:
+                if m in positive_msgs:
+                    dq_message_types[m] = "positive"
+                else:
+                    dq_message_types[m] = "negative"
+            if dq_messages:
+                for message in dq_messages:
+                    if dq_message_types.get(message) == "positive":
+                        st.sidebar.success(f"**Data Quality Check**: {message}")
+                    else:
+                        st.sidebar.error(f"**Data Quality Check**: {message}")
             st.sidebar.write(f"**Name:** {uploaded_file.name}")
             st.sidebar.write(f"**Rows:** {df.shape[0]}")
             st.sidebar.write(f"**Columns:** {df.shape[1]}")
@@ -154,24 +185,36 @@ if uploaded_file is not None:
                 feature_col1, feature_col2 = st.columns([3, 1])
                 with feature_col2:
                     if st.button("Select All"):
-                        st.session_state.selected_features = allowed_features.copy()  # use copy to avoid reference issues
+                        st.session_state.feature_selector = allowed_features.copy()  # use copy to avoid reference issues
                     if st.button("Clear All"):
-                        st.session_state.selected_features = []
+                        st.session_state.feature_selector = []
 
                 with feature_col1:
                     selected_features = st.multiselect(
                         "Select one or more features",
                         options=allowed_features,
-                        default=st.session_state.selected_features
+                        default=st.session_state.selected_features,
+                        key="feature_selector"
                     )
 
-                if selected_features != st.session_state.selected_features:
-                    st.session_state.selected_features = selected_features
+                # Sync selected_features in session state with feature_selector after the widget
+                st.session_state.selected_features = st.session_state.feature_selector
 
                 st.markdown("### Analysis Type")
                 analysis_type = st.selectbox(
-                    "Select one type of analysis",
-                    ["Summary statistics", "Histogram", "Correlation matrix", "Linear Regression", "Clustering", "Line Chart"]
+                    "Select analysis type",
+                    [
+                        "Summary statistics",
+                        "Frequency Table",
+                        "Histogram",
+                        "Box Plot",
+                        "Line Chart",
+                        "Correlation matrix",
+                        "Linear Regression",
+                        "Clustering"
+                    ],
+                    index=0,
+                    key="analysis_type_selectbox"
                 )
 
                 # X-axis selection for Line Chart, immediately below Analysis Type
@@ -195,6 +238,23 @@ if uploaded_file is not None:
                         key="cluster_dropdown"
                     )
 
+                # Grouping field (optional) for Box Plot: move outside run_analysis, right below analysis_type
+                group_col = None
+                show_outliers = None
+                if analysis_type == "Box Plot":
+                    group_col = st.selectbox(
+                        "Optional: Select categorical column to group by",
+                        options=["None"] + [col for col in df.columns if pd.api.types.is_object_dtype(df[col]) or pd.api.types.is_categorical_dtype(df[col])],
+                        key="boxplot_grouping"
+                    )
+                    group_col = None if group_col == "None" else group_col
+                    show_outliers = st.checkbox("Show Outliers", value=True, key="boxplot_outliers")
+                    run_analysis = st.button("Run Analysis")
+                else:
+                    # Reset group_col if not box plot
+                    group_col = None
+                    run_analysis = st.button("Run Analysis")
+
                 # Reset clustering run flag if analysis type changes
                 if "last_analysis_type" not in st.session_state:
                     st.session_state.last_analysis_type = None
@@ -210,9 +270,6 @@ if uploaded_file is not None:
                         options=selected_features,
                         key="dep_var_select"
                     )
-
-                # Run Analysis button appears below x-axis dropdown (for Line Chart) or below Analysis Type otherwise
-                run_analysis = st.button("Run Analysis")
 
             with right_col:
                 st.markdown("### Data Preview (First 10 Rows)")
@@ -437,6 +494,44 @@ if uploaded_file is not None:
                         except Exception as e:
                             st.error(f"Error during clustering: {e}")
 
+                elif analysis_type == "Frequency Table":
+                    st.markdown("## Frequency Tables")
+
+                    if not selected_features:
+                        st.warning("Please select at least one field.")
+                    else:
+                        categorical_fields = [f for f in selected_features if inferred_types.get(f) == "categorical"]
+                        non_cat_fields = [f for f in selected_features if f not in categorical_fields]
+
+                        if non_cat_fields:
+                            st.warning(f"The following fields are not categorical and will be skipped: {', '.join(non_cat_fields)}")
+
+                        if len(categorical_fields) > 3:
+                            st.warning("Only the first 3 categorical fields will be processed.")
+                            categorical_fields = categorical_fields[:3]
+
+                        for i, col in enumerate(categorical_fields):
+                            freq_data = df[col].fillna("(Missing)").value_counts(dropna=False).head(15).reset_index()
+                            if df[col].nunique(dropna=False) > 15:
+                                st.info(f"Only the top 15 most frequent values are shown for '{col}'.")
+                            freq_data.columns = [col, "Count"]
+                            freq_data["Percentage"] = (freq_data["Count"] / freq_data["Count"].sum() * 100).round(2)
+
+                            left_col, right_col = st.columns([1, 1])
+                            with left_col:
+                                st.markdown(f"### Frequency Table: {col}")
+                                st.dataframe(freq_data, use_container_width=True)
+
+                            with right_col:
+                                st.markdown(f"### Frequency Plot: {col}")
+                                fig, ax = plt.subplots()
+                                ax.barh(freq_data[col].astype(str), freq_data["Count"], color=plt.cm.tab10(i % 10))
+                                ax.set_xlabel("Count")
+                                ax.set_ylabel("Value")
+                                ax.invert_yaxis()
+                                ax.set_title(f"Top Values in '{col}'")
+                                st.pyplot(fig)
+
                 elif analysis_type == "Line Chart":
                     st.markdown("## Line Charts")
                     # Only render chart when Run Analysis is clicked and valid x_field is selected
@@ -482,7 +577,58 @@ if uploaded_file is not None:
                                         fig.autofmt_xdate()
                                     st.pyplot(fig)
 
+                elif analysis_type == "Box Plot":
+                    st.markdown("### Box Plot")
+
+                    # Use selected_features from session state, ensure they are valid and numeric
+                    numeric_selected = [f for f in selected_features if pd.api.types.is_numeric_dtype(df[f])]
+                    if not selected_features:
+                        st.warning("Please select at least one feature for the box plot.")
+                    elif not numeric_selected:
+                        st.warning("No valid numeric features selected for the box plot.")
+                    else:
+                        if len(numeric_selected) > 6:
+                            st.warning("More than 6 features selected. Only the first 6 will be shown.")
+                            numeric_selected = numeric_selected[:6]
+
+                        cleaned_df = df[numeric_selected + ([group_col] if group_col else [])].dropna()
+                        if len(cleaned_df) > 25000:
+                            cleaned_df = cleaned_df.sample(n=10000, random_state=42)
+
+                        import seaborn as sns
+                        for i, col in enumerate(numeric_selected):
+                            fig, ax = plt.subplots(figsize=(8, 4))
+                            df_box = cleaned_df
+                            sns.boxplot(
+                                data=df_box,
+                                x=group_col if group_col else None,
+                                y=col,
+                                color='skyblue',
+                                showmeans=True,
+                                meanprops={
+                                    "marker": "o",
+                                    "markerfacecolor": "white",
+                                    "markeredgecolor": "black"
+                                },
+                                showfliers=show_outliers,
+                                ax=ax,
+                                orient="h" if not group_col else "v"
+                            )
+                            if group_col:
+                                ax.set_title(f'{col} by {group_col}')
+                                ax.set_xlabel(group_col)
+                                ax.set_ylabel(col)
+                            else:
+                                ax.set_title(f'Box Plot: {col}')
+                                ax.set_xlabel(col)
+                            ax.grid(True, linestyle="--", alpha=0.5)
+                            st.pyplot(fig)
+
+                        st.markdown("#### Summary Statistics")
+                        st.dataframe(cleaned_df[numeric_selected].describe().T)
+
     except Exception as e:
         st.error(f"Error processing file: {e}")
 
     # --- Remove redundant line_chart_state rendering outside of run_analysis ---
+                

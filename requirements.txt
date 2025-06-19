@@ -1,7 +1,6 @@
-streamlit 
-pandas 
-numpy 
-matplotlib 
-scikit-learn 
-statsmodels 
-openpyxl
+streamlit
+pandas
+numpy
+matplotlib
+statsmodels
+scikit-learn

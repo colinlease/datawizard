@@ -23,6 +23,15 @@ st.write(
 )
 
 main_file = st.file_uploader("Upload your file here", type=["csv", "xls", "xlsx"], key="main")
+st.markdown(
+    """
+    <div style='background-color: #f0f2f6; padding: 1rem; border-radius: 0.5rem;'>
+        <strong>Need to combine multiple datasets before analysis?</strong><br>
+        Use our companion tool, <a href='https://datablender.streamlit.app/' target='_blank'>DataBlender</a>.
+    </div>
+    """,
+    unsafe_allow_html=True
+)
 uploaded_file = main_file if main_file is not None else sidebar_file
 
 if uploaded_file is not None:
@@ -86,10 +95,8 @@ if uploaded_file is not None:
                     selected_features = st.multiselect(
                         "Select one or more features",
                         options=allowed_features,
-                        default=st.session_state.selected_features
+                        default=st.session_state.get("selected_features", [])
                     )
-
-                # Sync session state (optional but safe)
                 st.session_state.selected_features = selected_features
 
                 st.markdown("### Analysis Type")

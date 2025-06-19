@@ -1,3 +1,41 @@
+def evaluate_data_cleanliness(df, inferred_types):
+    messages = []
+    missing_ratio = df.isna().mean().mean()
+    missing_per_col = df.isna().mean()
+    unnamed_cols = [c for c in df.columns if c.startswith("Unnamed") or c.strip() == ""]
+    duplicate_count = df.duplicated().sum()
+    datetime_cols = [col for col, t in inferred_types.items() if t == "datetime"]
+    mixed_type_cols = []
+    for col in df.select_dtypes(include=["object"]):
+        sample = df[col].dropna().astype(str).sample(min(20, len(df[col].dropna())))
+        types = sample.apply(lambda x: type(eval(x)) if x.isdigit() or (x.replace('.', '', 1).isdigit() and '.' in x) else type(x)).nunique()
+        if types > 1:
+            mixed_type_cols.append(col)
+
+    # Cleanliness messages
+    if missing_ratio < 0.01:
+        messages.append("Dataset is extremely clean. No missing values, well-defined structure.")
+    elif missing_ratio < 0.05:
+        messages.append("Dataset is clean with minor missing data. All columns appear well-defined.")
+    elif missing_ratio < 0.2 or duplicate_count > 0:
+        messages.append("Dataset is generally usable but includes some missing values and/or duplicate rows.")
+    elif missing_ratio < 0.5:
+        messages.append("Dataset contains significant missing values across multiple columns.")
+    else:
+        messages.append("Dataset has severe missing data issues. Many rows or columns are incomplete.")
+
+    # Structure messages
+    if unnamed_cols:
+        messages.append("Some columns may be improperly labeled (e.g., 'Unnamed'). Consider checking headers.")
+    elif df.shape[0] == 1 or df.shape[1] == 1:
+        messages.append("Dataset may lack structure—contains only one row or one column.")
+    elif mixed_type_cols:
+        messages.append("Some columns contain inconsistent data types. Check for formatting issues.")
+    elif datetime_cols:
+        messages.append("Likely time-series data detected. Datetime structure parsed successfully.")
+    elif missing_ratio > 0.5 and len(datetime_cols) == 0:
+        messages.append("Unable to determine clear structure. File may need reformatting before use.")
+    return messages[:2]
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -45,12 +83,21 @@ if uploaded_file is not None:
             st.error("File exceeds 75,000 row limit. Please upload a smaller file.")
         else:
             st.success(f"File uploaded successfully: {uploaded_file.name}")
+            # Reset selected features in session state when a new file is uploaded
+            st.session_state.selected_features = []
 
             inferred_types = {}
             for col in df.columns:
                 dtype = pd.api.types.infer_dtype(df[col], skipna=True)
                 if dtype in ["string", "categorical", "object"]:
-                    inferred_types[col] = "categorical"
+                    # Try parsing to datetime
+                    parsed_dates = pd.to_datetime(df[col], errors='coerce', infer_datetime_format=True)
+                    non_null_ratio = parsed_dates.notnull().mean()
+                    if non_null_ratio > 0.9:
+                        df[col] = parsed_dates
+                        inferred_types[col] = "datetime"
+                    else:
+                        inferred_types[col] = "categorical"
                 elif dtype in ["integer", "floating", "mixed-integer-float"]:
                     inferred_types[col] = "numeric"
                 elif dtype.startswith("datetime"):
@@ -58,8 +105,27 @@ if uploaded_file is not None:
                 else:
                     inferred_types[col] = "other"
 
+            cleanliness_messages = evaluate_data_cleanliness(df, inferred_types)
+
+            # Generate 't - fieldname' columns for datetime fields
+            datetime_cols = [col for col, t in inferred_types.items() if t == "datetime"]
+            for dt_col in datetime_cols:
+                try:
+                    temp_df = df[[dt_col]].copy()
+                    temp_df["original_index"] = temp_df.index
+                    temp_df = temp_df.dropna().sort_values(by=dt_col, ascending=True).reset_index()
+                    temp_df["t_index"] = temp_df.index + 1  # Start at 1
+                    df[f"t - {dt_col}"] = np.nan
+                    df.loc[temp_df["original_index"], f"t - {dt_col}"] = temp_df["t_index"].values
+                    inferred_types[f"t - {dt_col}"] = "numeric"
+                except Exception as e:
+                    st.warning(f"Could not generate t index for {dt_col}: {e}")
+
             st.sidebar.markdown("---")
             st.sidebar.markdown("### File Summary")
+            if cleanliness_messages:
+                for msg in cleanliness_messages:
+                    st.sidebar.info(f"**Data Quality Check**\n\n{msg}")
             st.sidebar.write(f"**Name:** {uploaded_file.name}")
             st.sidebar.write(f"**Rows:** {df.shape[0]}")
             st.sidebar.write(f"**Columns:** {df.shape[1]}")
@@ -77,7 +143,7 @@ if uploaded_file is not None:
 
                 # Filter allowed features
                 allowed_feature_types = {"categorical", "datetime", "numeric"}
-                allowed_features = [col for col in df.columns if inferred_types.get(col) in allowed_feature_types]
+                allowed_features = [col for col in df.columns if inferred_types.get(col) in allowed_feature_types or col.startswith("t - ")]
 
                 # Initialize session state if needed
                 if "selected_features" not in st.session_state:
@@ -95,14 +161,16 @@ if uploaded_file is not None:
                     selected_features = st.multiselect(
                         "Select one or more features",
                         options=allowed_features,
-                        default=st.session_state.get("selected_features", [])
+                        default=st.session_state.selected_features
                     )
-                st.session_state.selected_features = selected_features
+
+                if selected_features != st.session_state.selected_features:
+                    st.session_state.selected_features = selected_features
 
                 st.markdown("### Analysis Type")
                 analysis_type = st.selectbox(
                     "Select one type of analysis",
-                    ["Summary statistics", "Histogram", "Correlation matrix", "Linear Regression", "Clustering"]
+                    ["Summary statistics", "Histogram", "Correlation matrix", "Linear Regression", "Clustering", "Line Chart"]
                 )
 
                 # Add below analysis_type selectbox
@@ -283,6 +351,14 @@ if uploaded_file is not None:
                             st.error("You can include up to 8 independent variables in the regression.")
                         else:
                             data = df[[dependent_var] + X_cols].dropna()
+                            warn_fields = []
+                            for col in [dependent_var] + X_cols:
+                                ratio = df[col].isna().mean()
+                                if ratio > 0.2:
+                                    warn_fields.append((col, ratio))
+                            if warn_fields:
+                                st.warning("Some fields used in this regression have high missing values:\n" +
+                                           "\n".join([f"{col}: {ratio:.0%} missing" for col, ratio in warn_fields]))
                             X = sm.add_constant(data[X_cols])
                             y = data[dependent_var]
 
@@ -334,6 +410,14 @@ if uploaded_file is not None:
                         st.warning("Please select the number of clusters.")
                     else:
                         try:
+                            warn_fields = []
+                            for col in numeric_selected:
+                                ratio = df[col].isna().mean()
+                                if ratio > 0.2:
+                                    warn_fields.append((col, ratio))
+                            if warn_fields:
+                                st.warning("Some clustering fields have high missing values:\n" +
+                                           "\n".join([f"{col}: {ratio:.0%} missing" for col, ratio in warn_fields]))
                             X_raw = df[numeric_selected].dropna()
                             scaler = StandardScaler()
                             X_scaled = scaler.fit_transform(X_raw)
@@ -371,6 +455,46 @@ if uploaded_file is not None:
 
                         except Exception as e:
                             st.error(f"Error during clustering: {e}")
+
+                elif analysis_type == "Line Chart":
+                    st.markdown("## Line Charts")
+
+                    # Identify valid x-axis options
+                    valid_x_fields = [col for col in df.columns if inferred_types.get(col) == "datetime" or col.startswith("t - ")]
+
+                    if not valid_x_fields:
+                        st.warning("Line charts require a time-based x-axis. No datetime or t-index fields were found.")
+                    else:
+                        x_field = st.selectbox("Select a time-based field for the X-axis", options=valid_x_fields, key="x_axis_select")
+                        y_fields = [f for f in selected_features if inferred_types.get(f) == "numeric"]
+
+                        if not y_fields:
+                            st.warning("No numeric features selected for the Y-axis.")
+                        else:
+                            if len(y_fields) > 6:
+                                st.warning("More than 6 numeric features selected. Only the first 6 will be shown.")
+                                y_fields = y_fields[:6]
+
+                            for i, y_field in enumerate(y_fields):
+                                chart_df = df[[x_field, y_field]].dropna()
+                                if chart_df.empty:
+                                    st.warning(f"Skipping '{y_field}' due to missing values.")
+                                    continue
+
+                                chart_df = chart_df.sort_values(by=x_field)
+
+                                if i % 2 == 0:
+                                    col_left, col_right = st.columns([1, 1])
+                                target_col = col_left if i % 2 == 0 else col_right
+
+                                with target_col:
+                                    fig, ax = plt.subplots()
+                                    ax.plot(chart_df[x_field], chart_df[y_field], marker='o', linewidth=1.5)
+                                    ax.set_title(f"{y_field} over {x_field}")
+                                    ax.set_xlabel(x_field)
+                                    ax.set_ylabel(y_field)
+                                    ax.grid(True, linestyle="--", alpha=0.5)
+                                    st.pyplot(fig)
 
     except Exception as e:
         st.error(f"Error processing file: {e}")

@@ -5,3 +5,4 @@ matplotlib
 statsmodels
 scikit-learn
 python-dateutil
+seaborn

@@ -45,6 +45,7 @@ from collections import Counter
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
+import matplotlib.dates as mdates
 
 st.set_page_config(layout="wide")
 
@@ -173,6 +174,17 @@ if uploaded_file is not None:
                     ["Summary statistics", "Histogram", "Correlation matrix", "Linear Regression", "Clustering", "Line Chart"]
                 )
 
+                # X-axis selection for Line Chart, immediately below Analysis Type
+                x_field = None
+                valid_x_fields = []
+                if analysis_type == "Line Chart":
+                    # Identify valid x-axis options
+                    valid_x_fields = [col for col in df.columns if inferred_types.get(col) == "datetime" or col.startswith("t - ")]
+                    if not valid_x_fields:
+                        st.warning("Line charts require a time-based x-axis. No datetime or t-index fields were found.")
+                    else:
+                        x_field = st.selectbox("Select a time-based field for the X-axis", options=valid_x_fields, key="x_axis_select", index=0)
+
                 # Add below analysis_type selectbox
                 cluster_k = None
                 if analysis_type == "Clustering":
@@ -199,6 +211,7 @@ if uploaded_file is not None:
                         key="dep_var_select"
                     )
 
+                # Run Analysis button appears below x-axis dropdown (for Line Chart) or below Analysis Type otherwise
                 run_analysis = st.button("Run Analysis")
 
             with right_col:
@@ -290,8 +303,6 @@ if uploaded_file is not None:
                             st.pyplot(fig)
 
                 elif analysis_type == "Correlation matrix":
-                    st.markdown("## Correlation Matrix")
-
                     non_numeric_fields = [f for f in selected_features if inferred_types.get(f) != "numeric"]
                     if non_numeric_fields:
                         st.error("All selected features must be numeric for correlation analysis. "
@@ -301,36 +312,6 @@ if uploaded_file is not None:
                     else:
                         corr_data = df[selected_features].dropna()
                         corr_matrix = corr_data.corr()
-
-                        mask = np.triu(np.ones_like(corr_matrix, dtype=bool))
-                        fig, ax = plt.subplots(figsize=(min(10, 1 + 0.6 * len(selected_features)), 6))
-                        cax = ax.imshow(
-                            corr_matrix,
-                            cmap='coolwarm',
-                            vmin=-1,
-                            vmax=1
-                        )
-                        ax.set_xticks(np.arange(len(corr_matrix.columns)))
-                        ax.set_yticks(np.arange(len(corr_matrix.index)))
-                        ax.set_xticklabels(corr_matrix.columns, rotation=45, ha='right')
-                        ax.set_yticklabels(corr_matrix.index)
-
-                        for i in range(len(corr_matrix)):
-                            for j in range(len(corr_matrix)):
-                                if mask[i, j]:
-                                    continue
-                                ax.text(
-                                    j, i,
-                                    f"{corr_matrix.iloc[i, j]:.2f}",
-                                    ha='center',
-                                    va='center',
-                                    color="black",
-                                    fontsize=8
-                                )
-
-                        ax.set_title("Correlation Heatmap")
-                        fig.colorbar(cax, ax=ax, shrink=0.75)
-                        st.pyplot(fig)
 
                         st.markdown("### Correlation Table")
                         st.dataframe(corr_matrix.style.background_gradient(cmap='coolwarm'), use_container_width=True)
@@ -458,35 +439,29 @@ if uploaded_file is not None:
 
                 elif analysis_type == "Line Chart":
                     st.markdown("## Line Charts")
-
-                    # Identify valid x-axis options
-                    valid_x_fields = [col for col in df.columns if inferred_types.get(col) == "datetime" or col.startswith("t - ")]
-
+                    # Only render chart when Run Analysis is clicked and valid x_field is selected
                     if not valid_x_fields:
                         st.warning("Line charts require a time-based x-axis. No datetime or t-index fields were found.")
-                    else:
-                        x_field = st.selectbox("Select a time-based field for the X-axis", options=valid_x_fields, key="x_axis_select")
+                    elif run_analysis:
                         y_fields = [f for f in selected_features if inferred_types.get(f) == "numeric"]
-
                         if not y_fields:
                             st.warning("No numeric features selected for the Y-axis.")
                         else:
                             if len(y_fields) > 6:
                                 st.warning("More than 6 numeric features selected. Only the first 6 will be shown.")
                                 y_fields = y_fields[:6]
-
                             for i, y_field in enumerate(y_fields):
+                                # Defensive: skip if not in df
+                                if x_field not in df.columns or y_field not in df.columns:
+                                    continue
                                 chart_df = df[[x_field, y_field]].dropna()
                                 if chart_df.empty:
                                     st.warning(f"Skipping '{y_field}' due to missing values.")
                                     continue
-
                                 chart_df = chart_df.sort_values(by=x_field)
-
                                 if i % 2 == 0:
                                     col_left, col_right = st.columns([1, 1])
                                 target_col = col_left if i % 2 == 0 else col_right
-
                                 with target_col:
                                     fig, ax = plt.subplots()
                                     ax.plot(chart_df[x_field], chart_df[y_field], marker='o', linewidth=1.5)
@@ -494,7 +469,20 @@ if uploaded_file is not None:
                                     ax.set_xlabel(x_field)
                                     ax.set_ylabel(y_field)
                                     ax.grid(True, linestyle="--", alpha=0.5)
+                                    # Improved x-axis date formatting
+                                    # Only format as datetime if it's a real datetime field and not a t-index
+                                    if np.issubdtype(chart_df[x_field].dtype, np.datetime64) and not x_field.startswith("t - "):
+                                        num_days = (chart_df[x_field].max() - chart_df[x_field].min()).days
+                                        if num_days > 1500:
+                                            ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
+                                        elif num_days > 90:
+                                            ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %Y'))
+                                        else:
+                                            ax.xaxis.set_major_formatter(mdates.DateFormatter('%d-%b'))
+                                        fig.autofmt_xdate()
                                     st.pyplot(fig)
 
     except Exception as e:
         st.error(f"Error processing file: {e}")
+
+    # --- Remove redundant line_chart_state rendering outside of run_analysis ---

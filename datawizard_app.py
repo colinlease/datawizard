@@ -14,7 +14,7 @@ def evaluate_data_cleanliness(df, inferred_types):
 
     # Cleanliness messages
     if missing_ratio < 0.01:
-        messages.append("Dataset is extremely clean. No missing values, well-defined structure.")
+        messages.append("Dataset is extremely clean. Few or no missing values, well-defined structure.")
     elif missing_ratio < 0.05:
         messages.append("Dataset is clean with minor missing data. All columns appear well-defined.")
     elif missing_ratio < 0.2 or duplicate_count > 0:
@@ -62,14 +62,10 @@ st.write(
 )
 
 main_file = st.file_uploader("Upload your file here", type=["csv", "xls", "xlsx"], key="main")
-st.markdown(
-    """
-    <div style='background-color: #f0f2f6; padding: 1rem; border-radius: 0.5rem;'>
-        <strong>Need to combine multiple datasets before analysis?</strong><br>
-        Use our companion tool, <a href='https://datablendertool.streamlit.app/' target='_blank'>DataBlender</a>.
-    </div>
-    """,
-    unsafe_allow_html=True
+st.info(
+    "**Need more power tools?**\n\n"
+    "[**DataBlender**](https://datablendertool.streamlit.app/): Merge, pivot, and reshape your data.\n\n"
+    "[**DataSampler**](https://datasamplertool.streamlit.app/): Create smaller samples from large datasets."
 )
 uploaded_file = main_file if main_file is not None else sidebar_file
 
@@ -79,6 +75,30 @@ if uploaded_file is not None:
             df = pd.read_csv(uploaded_file)
         else:
             df = pd.read_excel(uploaded_file)
+
+        # --- Sampled Data Detection ---
+        if df.columns[-1] == "DS_SAMPLE":
+            sample_info_str = df.iloc[0, -1]
+            try:
+                if isinstance(sample_info_str, str) and sample_info_str.startswith("Sampled[") and "]" in sample_info_str:
+                    parts = sample_info_str.split("[")
+                    sample_type = parts[1][:-1]
+                    counts = parts[2][:-1].split("/")
+                    sample_n = int(counts[0])
+                    total_n = int(counts[1])
+                    sample_pct = round((sample_n / total_n) * 100, 2)
+                    st.session_state.sampled_data_info = {
+                        "sample_type": sample_type,
+                        "sample_n": sample_n,
+                        "total_n": total_n,
+                        "sample_pct": sample_pct
+                    }
+                else:
+                    st.session_state.sampled_data_info = {"error": "Malformed DS_SAMPLE format."}
+            except Exception:
+                st.session_state.sampled_data_info = {"error": "Could not parse DS_SAMPLE information."}
+        else:
+            st.session_state.sampled_data_info = None
 
         if df.shape[0] > 75000:
             st.error("File exceeds 75,000 row limit. Please upload a smaller file.")
@@ -119,7 +139,10 @@ if uploaded_file is not None:
                     else:
                         inferred_types[col] = "other"
 
-            cleanliness_messages = evaluate_data_cleanliness(df, inferred_types)
+            # Only generate cleanliness messages on file upload, and only if not already present
+            if "data_cleanliness_msgs" not in st.session_state:
+                st.session_state["data_cleanliness_msgs"] = evaluate_data_cleanliness(df, inferred_types)
+            cleanliness_messages = st.session_state["data_cleanliness_msgs"]
 
             # Generate 't - fieldname' columns for datetime fields
             datetime_cols = [col for col, t in inferred_types.items() if t == "datetime"]
@@ -135,39 +158,60 @@ if uploaded_file is not None:
                 except Exception as e:
                     st.warning(f"Could not generate t index for {dt_col}: {e}")
 
-            st.sidebar.markdown("---")
-            st.sidebar.markdown("### File Summary")
-            # --- Data Quality Message Rendering (dynamic coloring) ---
-            dq_messages = cleanliness_messages
-            # Define mapping for positive/negative
-            dq_message_types = {}
-            # Mark positive messages
-            positive_msgs = [
-                "Dataset is extremely clean. No missing values, well-defined structure.",
-                "Dataset is clean with minor missing data. All columns appear well-defined.",
-                "Likely time-series data detected. Datetime structure parsed successfully."
-            ]
-            for m in dq_messages:
-                if m in positive_msgs:
-                    dq_message_types[m] = "positive"
-                else:
-                    dq_message_types[m] = "negative"
-            if dq_messages:
-                for message in dq_messages:
-                    if dq_message_types.get(message) == "positive":
-                        st.sidebar.success(f"**Data Quality Check**: {message}")
-                    else:
-                        st.sidebar.error(f"**Data Quality Check**: {message}")
-            st.sidebar.write(f"**Name:** {uploaded_file.name}")
-            st.sidebar.write(f"**Rows:** {df.shape[0]}")
-            st.sidebar.write(f"**Columns:** {df.shape[1]}")
-            st.sidebar.write(f"**Missing Values:** {int(df.isna().sum().sum())}")
+            # ---------- Reordered Sidebar Layout ----------
+            with st.sidebar:
+                # Always show File Summary title first
+                st.markdown("### 📁 File Summary")
 
-            type_counts = Counter(inferred_types.values())
-            st.sidebar.markdown("### Column Types")
-            for t, count in type_counts.items():
-                label = t.capitalize() if t != "other" else "Other/Unknown"
-                st.sidebar.write(f"{label}: {count}")
+                # Show sampled data message if applicable
+                if st.session_state.get("sampled_data_info"):
+                    info = st.session_state.sampled_data_info
+                    if "error" in info:
+                        st.warning(f"⚠️ {info['error']}")
+                    else:
+                        st.markdown(f"""
+<div style='background-color:#fff3cd; padding:10px; border-radius:5px; border-left:5px solid #ffeeba'>
+<b>Sampled Data Detected</b><br><ul>
+<li><b>Sample type:</b> {info['sample_type']}</li>
+<li><b>Original size:</b> {info['total_n']}</li>
+<li><b>Sample size:</b> {info['sample_n']}</li>
+<li><b>Coverage:</b> {info['sample_pct']}%</li>
+</ul></div>
+""", unsafe_allow_html=True)
+
+                # Add spacing between sampled data and data cleanliness
+                st.markdown("<br>", unsafe_allow_html=True)
+
+                # Data cleanliness messages
+                dq_messages = st.session_state.get("data_cleanliness_msgs", [])
+                if dq_messages:
+                    for msg in dq_messages:
+                        msg_lower = msg.lower()
+                        if any(x in msg_lower for x in ["no missing", "extremely clean", "well-defined", "looks great"]):
+                            st.success(msg)
+                        elif any(x in msg_lower for x in ["too many", "poorly structured", "inconsistent", "invalid", "corrupt"]):
+                            st.error(msg)
+                        else:
+                            st.warning(msg)
+
+                # File summary details (ensure this block executes correctly)
+                # Prepare file_info dict and store in session_state for access
+                file_info = {
+                    "name": uploaded_file.name,
+                    "size": round(uploaded_file.size/1024/1024, 3) if hasattr(uploaded_file, "size") else "N/A",
+                    "rows": df.shape[0],
+                    "cols": df.shape[1],
+                    "missing": int(df.isna().sum().sum())
+                }
+                st.session_state["file_info"] = file_info
+                st.session_state["df"] = df
+                if st.session_state.get("df") is not None and st.session_state.get("file_info"):
+                    file_info = st.session_state["file_info"]
+                    st.markdown(f"**File Name:** {file_info['name']}")
+                    st.markdown(f"**File Size:** {file_info['size']} MB")
+                    st.markdown(f"**Rows:** {file_info['rows']}")
+                    st.markdown(f"**Columns:** {file_info['cols']}")
+                    st.markdown(f"**Missing Fields:** {file_info['missing']}")
 
             left_col, right_col = st.columns([1, 1])
             with left_col:
@@ -185,15 +229,14 @@ if uploaded_file is not None:
                 feature_col1, feature_col2 = st.columns([3, 1])
                 with feature_col2:
                     if st.button("Select All"):
-                        st.session_state.feature_selector = allowed_features.copy()  # use copy to avoid reference issues
+                        st.session_state["feature_selector"] = allowed_features.copy()
                     if st.button("Clear All"):
-                        st.session_state.feature_selector = []
+                        st.session_state["feature_selector"] = []
 
                 with feature_col1:
                     selected_features = st.multiselect(
                         "Select one or more features",
                         options=allowed_features,
-                        default=st.session_state.selected_features,
                         key="feature_selector"
                     )
 
@@ -630,5 +673,8 @@ if uploaded_file is not None:
     except Exception as e:
         st.error(f"Error processing file: {e}")
 
-    # --- Remove redundant line_chart_state rendering outside of run_analysis ---
-                
+else:
+    # On reset or file removal, ensure sampled_data_info and cleanliness messages disappear
+    st.session_state.pop("sampled_data_info", None)
+    st.session_state.pop("file_info", None)
+    st.session_state.pop("data_cleanliness_msgs", None)

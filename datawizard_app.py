@@ -66,7 +66,7 @@ st.markdown(
     """
     <div style='background-color: #f0f2f6; padding: 1rem; border-radius: 0.5rem;'>
         <strong>Need to combine multiple datasets before analysis?</strong><br>
-        Use our companion tool, <a href='https://datablender.streamlit.app/' target='_blank'>DataBlender</a>.
+        Use our companion tool, <a href='https://datablendertool.streamlit.app/' target='_blank'>DataBlender</a>.
     </div>
     """,
     unsafe_allow_html=True

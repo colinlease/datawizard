@@ -60,6 +60,11 @@ def download_dataframe(token: str, source_app: str = None) -> tuple[pd.DataFrame
     for app in source_apps:
         key = find_file_by_token(app, token)
         if key:
+            head_response = s3_client.head_object(Bucket=S3_BUCKET_NAME, Key=key)
+            last_modified = head_response["LastModified"].replace(tzinfo=None)
+            age = (datetime.utcnow() - last_modified).total_seconds()
+            if age > 900:
+                raise FileNotFoundError("Token has expired.")
             response = s3_client.get_object(Bucket=S3_BUCKET_NAME, Key=key)
             content = response["Body"].read().decode("utf-8")
             df = pd.read_csv(StringIO(content))

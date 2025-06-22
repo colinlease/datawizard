@@ -191,7 +191,7 @@ st.set_page_config(layout="wide")
 
 
 with st.sidebar:
-    with st.expander("**More Tools**", expanded=False):
+    with st.expander("**More Tools**", expanded=True):
         st.markdown("""
 - [**DataBlender**](https://datablendertool.streamlit.app/)
 - [**DataSampler**](https://datasamplertool.streamlit.app/)

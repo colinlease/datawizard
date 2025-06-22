@@ -121,7 +121,19 @@ def list_active_filehub_objects_ui():
             unsafe_allow_html=True
         )
 
+def delete_expired_files():
+    response = s3_client.list_objects_v2(Bucket=S3_BUCKET_NAME)
+    if "Contents" not in response:
+        return
+
+    now = datetime.utcnow()
+    for obj in response["Contents"]:
+        age = (now - obj["LastModified"].replace(tzinfo=None)).total_seconds()
+        if age > 900:
+            s3_client.delete_object(Bucket=S3_BUCKET_NAME, Key=obj["Key"])
+
 if __name__ == "__main__":
     st.set_page_config(page_title="Admin Console – FileHub Backend Transfers")
-    st_autorefresh(interval=1000, key="auto-refresh")
+    st_autorefresh(interval=30000, key="auto-refresh")  # refresh every 30 sec
+    delete_expired_files()
     list_active_filehub_objects_ui()

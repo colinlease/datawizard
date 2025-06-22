@@ -43,6 +43,11 @@ def process_incoming_dataframe(df, filename):
     st.session_state["df"] = df
     st.session_state["filename"] = filename
 
+    # Explicitly reset session state fields to guarantee overwrite
+    st.session_state.pop("sampled_data_info", None)
+    st.session_state.pop("file_info", None)
+    st.session_state.pop("data_cleanliness_msgs", None)
+
     # --- Sampled Data Detection ---
     sample_cols = [col for col in df.columns if col.startswith("DS_SAMPLE")]
     parsed_samples = []
@@ -113,9 +118,8 @@ def process_incoming_dataframe(df, filename):
         except Exception as e:
             st.warning(f"Could not generate t index for {dt_col}: {e}")
 
-    # Only generate cleanliness messages on file upload, and only if not already present or new file
-    if "data_cleanliness_msgs" not in st.session_state or st.session_state.get("df") is not df:
-        st.session_state["data_cleanliness_msgs"] = evaluate_data_cleanliness(df, inferred_types)
+    # Always regenerate cleanliness messages and metadata on new file
+    st.session_state["data_cleanliness_msgs"] = evaluate_data_cleanliness(df, inferred_types)
 
     # File info
     file_info = {

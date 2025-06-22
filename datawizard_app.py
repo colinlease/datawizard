@@ -207,7 +207,7 @@ st.title("DataWizard")
 st.subheader("Upload your data to begin analysis")
 st.write(
     "This tool lets you upload a CSV or Excel file and quickly view summary statistics, charts, distributions, run regressions, cluster your data, and more. "
-    "You can upload your file using the button below or from the sidebar."
+    "You can upload your file using the button below or import data by entering a FileHub token."
 )
 
 main_file = st.file_uploader("Upload your file here", type=["csv", "xls", "xlsx"], key="main")

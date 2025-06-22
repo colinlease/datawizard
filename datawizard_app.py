@@ -177,7 +177,7 @@ def evaluate_data_cleanliness(df, inferred_types):
     return messages[:2]
 import streamlit as st
 import matplotlib.pyplot as plt
-import statsmodels.api as sm
+# import statsmodels.api as sm
 from collections import Counter
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
@@ -599,46 +599,54 @@ if run_analysis and st.session_state.get("file_loaded", False) and st.session_st
                 if warn_fields:
                     st.warning("Some fields used in this regression have high missing values:\n" +
                                "\n".join([f"{col}: {ratio:.0%} missing" for col, ratio in warn_fields]))
-                X = sm.add_constant(data[X_cols])
-                y = data[dependent_var]
+                # TEMPORARILY DISABLED DUE TO SCIPY/STATS MODELS COMPATIBILITY ISSUE
+                # X = sm.add_constant(data[X_cols])
+                # TEMPORARILY DISABLED DUE TO SCIPY/STATS MODELS COMPATIBILITY ISSUE
+                # y = data[dependent_var]
 
-                model = sm.OLS(y, X).fit()
+                # TEMPORARILY DISABLED DUE TO SCIPY/STATS MODELS COMPATIBILITY ISSUE
+                # model = sm.OLS(y, X).fit()
 
-                eqn_parts = [f"{model.params[name]:.4f} × {name}" for name in X_cols]
-                intercept = model.params["const"] if "const" in model.params else 0
-                equation_latex = f"$ {dependent_var} = {intercept:.4f} + " + " + ".join(eqn_parts) + " $"
-                st.markdown("### Regression Equation")
-                st.markdown(equation_latex)
+                # TEMPORARILY DISABLED DUE TO SCIPY/STATS MODELS COMPATIBILITY ISSUE
+                # eqn_parts = [f"{model.params[name]:.4f} × {name}" for name in X_cols]
+                # intercept = model.params["const"] if "const" in model.params else 0
+                # equation_latex = f"$ {dependent_var} = {intercept:.4f} + " + " + ".join(eqn_parts) + " $"
+                # st.markdown("### Regression Equation")
+                # st.markdown(equation_latex)
 
-                summary_df = pd.DataFrame({
-                    "Coefficient": model.params,
-                    "P-Value": model.pvalues,
-                })
-                summary_df.index.name = "Variable"
-                summary_df = summary_df.round(4)
+                # TEMPORARILY DISABLED DUE TO SCIPY/STATS MODELS COMPATIBILITY ISSUE
+                # summary_df = pd.DataFrame({
+                #     "Coefficient": model.params,
+                #     "P-Value": model.pvalues,
+                # })
+                # summary_df.index.name = "Variable"
+                # summary_df = summary_df.round(4)
 
-                st.markdown("### Regression Summary")
-                st.dataframe(summary_df)
+                # TEMPORARILY DISABLED DUE TO SCIPY/STATS MODELS COMPATIBILITY ISSUE
+                # st.markdown("### Regression Summary")
+                # st.dataframe(summary_df)
 
-                st.markdown(f"**R²:** {model.rsquared:.4f}")
-                if len(X_cols) > 1:
-                    st.markdown(f"**Adjusted R²:** {model.rsquared_adj:.4f}")
+                # TEMPORARILY DISABLED DUE TO SCIPY/STATS MODELS COMPATIBILITY ISSUE
+                # st.markdown(f"**R²:** {model.rsquared:.4f}")
+                # if len(X_cols) > 1:
+                #     st.markdown(f"**Adjusted R²:** {model.rsquared_adj:.4f}")
 
-                if len(X_cols) == 1:
-                    st.markdown("### Regression Plot")
-                    x_vals = data[X_cols[0]]
-                    y_vals = y
-                    y_pred = model.predict(X)
+                # TEMPORARILY DISABLED DUE TO SCIPY/STATS MODELS COMPATIBILITY ISSUE
+                # if len(X_cols) == 1:
+                #     st.markdown("### Regression Plot")
+                #     x_vals = data[X_cols[0]]
+                #     y_vals = y
+                #     y_pred = model.predict(X)
 
-                    fig, ax = plt.subplots()
-                    ax.scatter(x_vals, y_vals, alpha=0.6, label="Data")
-                    ax.plot(x_vals, y_pred, color="red", label="Regression Line")
-                    ax.set_xlabel(X_cols[0])
-                    ax.set_ylabel(dependent_var)
-                    ax.set_title(f"{dependent_var} vs {X_cols[0]}")
-                    ax.legend()
-                    ax.grid(True, linestyle="--", alpha=0.5)
-                    st.pyplot(fig)
+                #     fig, ax = plt.subplots()
+                #     ax.scatter(x_vals, y_vals, alpha=0.6, label="Data")
+                #     ax.plot(x_vals, y_pred, color="red", label="Regression Line")
+                #     ax.set_xlabel(X_cols[0])
+                #     ax.set_ylabel(dependent_var)
+                #     ax.set_title(f"{dependent_var} vs {X_cols[0]}")
+                #     ax.legend()
+                #     ax.grid(True, linestyle="--", alpha=0.5)
+                #     st.pyplot(fig)
 
     elif analysis_type == "Clustering":
         st.markdown("## K-Means Clustering")

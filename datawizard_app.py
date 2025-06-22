@@ -506,9 +506,15 @@ if run_analysis and st.session_state.get("file_loaded", False) and st.session_st
                 })
 
             elif col_type == "categorical":
-                most_common = col_data.mode().iloc[0] if not col_data.mode().empty else "None"
                 value_counts = col_data.value_counts()
-                least_common = value_counts.idxmin() if not value_counts.empty else "None"
+                if len(value_counts) == 1:
+                    most_common = ""
+                    least_common = ""
+                else:
+                    top_counts = value_counts[value_counts == value_counts.max()]
+                    bottom_counts = value_counts[value_counts == value_counts.min()]
+                    most_common = top_counts.index[0] if len(top_counts) == 1 else ""
+                    least_common = bottom_counts.index[0] if len(bottom_counts) == 1 else ""
 
                 results.append({
                     "Field": col,

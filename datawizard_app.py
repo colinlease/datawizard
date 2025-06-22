@@ -236,6 +236,14 @@ if uploaded_file is not None:
             if df.shape[0] > 75000:
                 st.error("File exceeds 75,000 row limit. Please upload a smaller file.")
             else:
+                # Clear all prior file-related session state to allow full overwrite
+                st.session_state.pop("df", None)
+                st.session_state.pop("filename", None)
+                st.session_state.pop("sampled_data_info", None)
+                st.session_state.pop("file_info", None)
+                st.session_state.pop("data_cleanliness_msgs", None)
+                st.session_state["upload_processed"] = False
+                st.session_state["file_from_filehub"] = False
                 # Unify logic: use same processing as FileHub
                 process_incoming_dataframe(df, uploaded_file.name)
                 st.session_state["file_from_filehub"] = False

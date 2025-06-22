@@ -837,4 +837,4 @@ elif not st.session_state.get("file_loaded", False):
     st.session_state["df"] = None
     st.session_state.pop("filename", None)
 
-# (Removed redundant logic that sets selected_features from session state again to avoid mutation error)
+

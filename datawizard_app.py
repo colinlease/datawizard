@@ -215,11 +215,6 @@ st.write(
 )
 
 main_file = st.file_uploader("Upload your file here", type=["csv", "xls", "xlsx"], key="main")
-st.info(
-    "**Need more power tools?**\n\n"
-    "[**DataBlender**](https://datablendertool.streamlit.app/): Merge, pivot, and reshape your data.\n\n"
-    "[**DataSampler**](https://datasamplertool.streamlit.app/): Create smaller samples from large datasets."
-)
 
  # ---------- File Selection Logic (uploaded file or FileHub) ----------
 # Uploaded file always takes precedence over file loaded via transfer token
@@ -293,6 +288,12 @@ if st.session_state.get("file_loaded", False):
 
     # ---------- Reordered Sidebar Layout ----------
     with st.sidebar:
+        # --- More Tools Expander at the top ---
+        with st.expander("**More Tools**", expanded=True):
+            st.markdown("""
+- [DataBlender](https://datablendertool.streamlit.app/)
+- [DataSampler](https://datasamplertool.streamlit.app/)
+""", unsafe_allow_html=True)
         st.markdown("### 📁 File Summary")
         sampled_info = st.session_state.get("sampled_data_info", [])
         if sampled_info:

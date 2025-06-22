@@ -190,22 +190,28 @@ st.set_page_config(layout="wide")
 
 
 
-# --------- Transfer Token Section (FileHub) ---------
-transfer_token = st.sidebar.text_input("Enter transfer token to load file from FileHub", key="transfer_token_input")
-if st.sidebar.button("Submit Token"):
-    if transfer_token:
-        with st.spinner("Retrieving file from FileHub..."):
-            try:
-                from filehub_app import download_dataframe
-                df_from_filehub, original_filename = download_dataframe(transfer_token.strip())
-                # Unify logic: use same processing as file upload
-                process_incoming_dataframe(df_from_filehub, original_filename)
-                st.session_state["file_from_filehub"] = True
-                st.success(f"Successfully imported file: {original_filename}")
-            except Exception as e:
-                st.sidebar.error(f"Error retrieving file: {e}")
-    else:
-        st.sidebar.warning("Please enter a token before submitting.")
+with st.sidebar:
+    with st.expander("**More Tools**", expanded=False):
+        st.markdown("""
+- [**DataBlender**](https://datablendertool.streamlit.app/)
+- [**DataSampler**](https://datasamplertool.streamlit.app/)
+""")
+    # --------- Transfer Token Section (FileHub) ---------
+    transfer_token = st.text_input("Enter transfer token to load file from FileHub", key="transfer_token_input")
+    if st.button("Submit Token"):
+        if transfer_token:
+            with st.spinner("Retrieving file from FileHub..."):
+                try:
+                    from filehub_app import download_dataframe
+                    df_from_filehub, original_filename = download_dataframe(transfer_token.strip())
+                    # Unify logic: use same processing as file upload
+                    process_incoming_dataframe(df_from_filehub, original_filename)
+                    st.session_state["file_from_filehub"] = True
+                    st.success(f"Successfully imported file: {original_filename}")
+                except Exception as e:
+                    st.error(f"Error retrieving file: {e}")
+        else:
+            st.warning("Please enter a token before submitting.")
 
 # ---------- Main Layout ----------
 st.title("DataWizard")
@@ -216,11 +222,6 @@ st.write(
 )
 
 main_file = st.file_uploader("Upload your file here", type=["csv", "xls", "xlsx"], key="main")
-st.info(
-    "**Need more power tools?**\n\n"
-    "[**DataBlender**](https://datablendertool.streamlit.app/): Merge, pivot, and reshape your data.\n\n"
-    "[**DataSampler**](https://datasamplertool.streamlit.app/): Create smaller samples from large datasets."
-)
 
  # ---------- File Selection Logic (uploaded file or FileHub) ----------
 # Uploaded file always takes precedence over file loaded via transfer token

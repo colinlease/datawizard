@@ -1,8 +1,8 @@
 streamlit
 pandas
-numpy
+numpy==1.24.4
 matplotlib
-statsmodels
+statsmodels==0.14.0
 scikit-learn
 python-dateutil
 seaborn
@@ -10,4 +10,3 @@ openpyxl
 boto3
 streamlit-autorefresh
 scipy==1.11.4
-statsmodels==0.14.0

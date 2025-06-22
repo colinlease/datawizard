@@ -3,6 +3,7 @@ import numpy as np
 import streamlit as st
 import os
 
+#FileHub imports for transfer functionality
 from filehub_app import upload_dataframe, download_dataframe
 
 # Sanity check for required AWS credentials

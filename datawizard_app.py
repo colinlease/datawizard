@@ -187,9 +187,6 @@ import matplotlib.dates as mdates
 
 st.set_page_config(layout="wide")
 
-
-
-
 with st.sidebar:
     with st.expander("**More Tools**", expanded=True):
         st.markdown("""

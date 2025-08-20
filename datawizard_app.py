@@ -24,7 +24,15 @@ if "feature_selection" not in st.session_state:
 
 # ----------------- Session State Initialization -----------------
 # Ensure all keys used later are initialized before access
-for key in ["df", "filename", "selected_features", "analysis_type", "analysis_results", "feature_selector", "feature_selector_options", "analysis_type_selectbox", "dep_var_select", "x_axis_select", "cluster_dropdown", "boxplot_grouping", "boxplot_outliers"]:
+for key in [
+    "df", "filename", "selected_features", "analysis_type", "analysis_results",
+    "feature_selector", "feature_selector_options", "analysis_type_selectbox", "dep_var_select", "x_axis_select",
+    "cluster_dropdown", "boxplot_grouping", "boxplot_outliers",
+    "date_filter_mode", "date_filter_range", "t_filter_range",
+    "enable_group_line", "group_by_col", "group_category_values",
+    "line_agg_method", "line_category_mode", "line_selected_category",
+    "line_selected_categories"
+]:
     if key not in st.session_state:
         if key in ["df"]:
             st.session_state[key] = None
@@ -184,6 +192,7 @@ from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 import matplotlib.dates as mdates
+import altair as alt
 
 st.set_page_config(layout="wide")
 
@@ -374,7 +383,6 @@ if st.session_state.get("file_loaded", False):
             selected_features = st.multiselect(
                 "Select features",
                 options=st.session_state["df"].columns.tolist(),
-                default=st.session_state.get("selected_features", []),
                 key="selected_features"
             )
             st.session_state["trigger_feature_update"] = False
@@ -399,9 +407,18 @@ if st.session_state.get("file_loaded", False):
             index=0,
             key="analysis_type_selectbox"
         )
-        # "Run Analysis" button now in main panel, after analysis type selection
-        run_analysis = st.button("Run Analysis")
-        # X field for Line Chart
+        # Dependent variable for regression (positioned directly under analysis type)
+        dependent_var = None
+        if analysis_type == "Linear Regression" and selected_features:
+            # default to the first selected feature if none chosen yet
+            if "dep_var_select" not in st.session_state and selected_features:
+                st.session_state["dep_var_select"] = selected_features[0]
+            dependent_var = st.selectbox(
+                "Select dependent variable",
+                options=selected_features,
+                key="dep_var_select"
+            )
+        # Time-based X-axis selection for Line Chart (positioned under analysis type)
         x_field = None
         valid_x_fields = []
         if analysis_type == "Line Chart":
@@ -409,8 +426,148 @@ if st.session_state.get("file_loaded", False):
             if not valid_x_fields:
                 st.warning("Line charts require a time-based x-axis. No datetime or t-index fields were found.")
             else:
-                x_field = st.session_state.get("x_axis_select", valid_x_fields[0] if valid_x_fields else None)
-                x_field = st.selectbox("Select a time-based field for the X-axis", options=valid_x_fields, key="x_axis_select", index=0)
+                # default to first valid if none chosen yet
+                if "x_axis_select" not in st.session_state and valid_x_fields:
+                    st.session_state["x_axis_select"] = valid_x_fields[0]
+                x_field = st.selectbox(
+                    "Select a time-based field for the X-axis",
+                    options=valid_x_fields,
+                    key="x_axis_select",
+                    index=0
+                )
+        # Date / t-index filter controls for Line Chart (shown beneath X-axis selector)
+        if analysis_type == "Line Chart":
+            if x_field and x_field in df.columns:
+                # DATETIME FILTER MODE
+                if inferred_types.get(x_field) == "datetime" and not x_field.startswith("t - "):
+                    # Compute bounds
+                    x_nonnull = df[x_field].dropna()
+                    if not x_nonnull.empty:
+                        xmin = x_nonnull.min().date()
+                        xmax = x_nonnull.max().date()
+                        # Presets + Custom
+                        preset_options = [
+                            "All", "YTD", "Last 7 days", "Last 30 days", "Last 90 days", "Last 365 days", "Custom"
+                        ]
+                        mode = st.selectbox(
+                            "Date range (optional)",
+                            options=preset_options,
+                            index=0,
+                            key="date_filter_mode"
+                        )
+                        # Persist custom range
+                        if "date_filter_range" not in st.session_state or not st.session_state["date_filter_range"]:
+                            st.session_state["date_filter_range"] = (xmin, xmax)
+                        if mode == "Custom":
+                            # Always use (xmin, xmax) as the default value for the date_input
+                            dr = st.date_input(
+                                "Select custom date range",
+                                value=(xmin, xmax),
+                                min_value=xmin,
+                                max_value=xmax,
+                                key="custom_date_range"
+                            )
+                            # After assignment, ensure session_state["date_filter_range"] defaults to (xmin, xmax) if not set
+                            if isinstance(dr, tuple) and len(dr) == 2:
+                                st.session_state["date_filter_range"] = (dr[0], dr[1])
+                            if (
+                                "date_filter_range" not in st.session_state
+                                or not st.session_state["date_filter_range"]
+                                or not isinstance(st.session_state["date_filter_range"], tuple)
+                                or len(st.session_state["date_filter_range"]) != 2
+                            ):
+                                st.session_state["date_filter_range"] = (xmin, xmax)
+                        else:
+                            # Ensure range is synced to preset on change
+                            st.session_state["date_filter_range"] = (xmin, xmax)
+                # T-INDEX FILTER MODE (numeric t-index)
+                elif x_field.startswith("t - ") or inferred_types.get(x_field) == "numeric":
+                    x_nonnull = df[x_field].dropna()
+                    if not x_nonnull.empty:
+                        tmin = int(np.nanmin(x_nonnull))
+                        tmax = int(np.nanmax(x_nonnull))
+                        if "t_filter_range" not in st.session_state or not st.session_state["t_filter_range"]:
+                            st.session_state["t_filter_range"] = (tmin, tmax)
+                        st.session_state["t_filter_range"] = st.slider(
+                            "Index range",
+                            min_value=tmin,
+                            max_value=tmax,
+                            value=st.session_state.get("t_filter_range", (tmin, tmax))
+                        )
+            # Guided workflow: offer to split lines by category if we detect duplicates per x value
+            group_by_col = None
+            enable_group = False
+            if analysis_type == "Line Chart" and x_field and x_field in df.columns:
+                # Detect duplicates on x_field (multiple rows per time value)
+                try:
+                    has_dupes_on_x = df[x_field].duplicated().any()
+                except Exception:
+                    has_dupes_on_x = False
+
+                # Candidate categorical columns
+                categorical_candidates = [c for c, t in inferred_types.items() if t == "categorical" and c in df.columns]
+
+                if has_dupes_on_x and categorical_candidates:
+                    enable_group = st.checkbox(
+                        "Group by categorical variable (e.g., Country)",
+                        key="enable_group_line"
+                    )
+                    if enable_group:
+                        # Group-by selector appears immediately
+                        group_by_col = st.selectbox(
+                            "Group by",
+                            options=categorical_candidates,
+                            index=0 if st.session_state.get("group_by_col") is None or st.session_state.get("group_by_col") not in categorical_candidates else categorical_candidates.index(st.session_state.get("group_by_col")),
+                            key="group_by_col"
+                        )
+
+                        # Aggregation method toggle (shows immediately on enable)
+                        agg_method = st.radio(
+                            "Aggregation method",
+                            options=["Mean", "Sum"],
+                            horizontal=True,
+                            key="line_agg_method"
+                        )
+
+                        # Category mode (shows immediately on enable)
+                        cat_mode = st.radio(
+                            "Category mode",
+                            options=["All categories (aggregate)", "Pick a category"],
+                            key="line_category_mode"
+                        )
+
+                        # Category picker (multi-select up to 5) when a group-by column is chosen and mode requires it
+                        if cat_mode == "Pick a category" and group_by_col:
+                            uniq_vals = df[group_by_col].dropna().astype(str).unique().tolist()
+                            uniq_vals = sorted(uniq_vals)[:1000]
+                            # Migrate legacy single selection to list if present
+                            legacy_single = st.session_state.get("line_selected_category", None)
+                            if legacy_single is not None and not st.session_state.get("line_selected_categories"):
+                                st.session_state["line_selected_categories"] = [str(legacy_single)] if str(legacy_single) in uniq_vals else []
+                            # Default selection: previously chosen list or first up to 3
+                            default_list = st.session_state.get("line_selected_categories")
+                            if not isinstance(default_list, list) or not default_list:
+                                default_list = uniq_vals[:3]
+                            selected_categories = st.multiselect(
+                                f"Select up to 5 {group_by_col} values",
+                                options=uniq_vals,
+                                default=default_list,
+                                key="line_selected_categories"
+                            )
+                            if isinstance(selected_categories, list) and len(selected_categories) > 5:
+                                st.warning("Limiting to the first 5 selected categories.")
+                                st.session_state["line_selected_categories"] = selected_categories[:5]
+                    else:
+                        # Clear grouping selections when the feature is turned off
+                        st.session_state["group_by_col"] = None
+                        st.session_state["group_category_values"] = []
+                        st.session_state["line_category_mode"] = None
+                        st.session_state["line_selected_category"] = None
+                        st.session_state["line_agg_method"] = None
+                        st.session_state["line_selected_categories"] = []
+                        st.session_state["line_selected_category"] = None
+        # "Run Analysis" button now appears after axis selection / dependent var
+        run_analysis = st.button("Run Analysis")
         # Clustering k
         cluster_k = None
         if analysis_type == "Clustering":
@@ -442,15 +599,6 @@ if st.session_state.get("file_loaded", False):
         if st.session_state.last_analysis_type != analysis_type:
             st.session_state.run_clustering = False
             st.session_state.last_analysis_type = analysis_type
-        # Dependent variable for regression
-        dependent_var = None
-        if analysis_type == "Linear Regression" and selected_features:
-            dependent_var = st.session_state.get("dep_var_select", selected_features[0] if selected_features else None)
-            dependent_var = st.selectbox(
-                "Select dependent variable",
-                options=selected_features,
-                key="dep_var_select"
-            )
     with right_col:
         st.markdown("### Data Preview (First 10 Rows)")
         st.dataframe(df.head(10), use_container_width=True)
@@ -549,19 +697,124 @@ if run_analysis and st.session_state.get("file_loaded", False) and st.session_st
             st.warning("More than 6 features selected. Only the first 6 will be shown.")
             numeric_features = numeric_features[:6]
 
+        # Define a color palette for dynamic feature coloring
+        palette = ['#4C78A8', '#F58518', '#54A24B', '#E45756', '#72B7B2', '#FFA600']
+
         for i, col in enumerate(numeric_features):
+            feature_color = palette[i % len(palette)]
             if i % 2 == 0:
                 col_left, col_right = st.columns([1, 1])
             target_col = col_left if i % 2 == 0 else col_right
 
             with target_col:
-                fig, ax = plt.subplots()
-                ax.hist(df[col].dropna(), bins=30, edgecolor='white', color=plt.cm.tab10(i % 10))
-                ax.set_title(col)
-                ax.set_xlabel("Value")
-                ax.set_ylabel("Frequency")
-                ax.grid(True, linestyle="--", alpha=0.5)
-                st.pyplot(fig)
+                col_series = pd.to_numeric(df[col], errors='coerce').dropna()
+                if col_series.empty:
+                    st.warning(f"No data available for '{col}'. Skipping.")
+                else:
+                    vals = col_series.values
+                    n = len(vals)
+                    try:
+                        # Central 95%: 2.5th to 97.5th percentiles
+                        p_low = np.quantile(vals, 0.025)
+                        p_high = np.quantile(vals, 0.975)
+                    except Exception:
+                        p_low, p_high = np.min(vals), np.max(vals)
+
+                    if not np.isfinite(p_low) or not np.isfinite(p_high) or p_high <= p_low:
+                        # Fallback to automatic binning if degenerate
+                        chart_df = pd.DataFrame({col: col_series})
+                        chart = (
+                            alt.Chart(chart_df)
+                            .mark_bar()
+                            .encode(
+                                x=alt.X(col, bin=alt.Bin(maxbins=30), title="Value"),
+                                y=alt.Y('count()', title="Frequency", scale=alt.Scale(zero=True)),
+                                tooltip=[alt.Tooltip('count()', title='Count')]
+                            )
+                            .properties(title=f"Distribution of {col}", width='container')
+                        )
+                        st.altair_chart(chart, use_container_width=True)
+                    else:
+                        # Build 8 equal-width interior bins + 2 catch-all bins
+                        interior_bins = 8
+                        width = (p_high - p_low) / interior_bins if p_high > p_low else 0
+                        if width <= 0:
+                            chart_df = pd.DataFrame({col: col_series})
+                            chart = (
+                                alt.Chart(chart_df)
+                                .mark_bar()
+                                .encode(
+                                    x=alt.X(col, bin=alt.Bin(maxbins=30), title="Value"),
+                                    y=alt.Y('count()', title="Frequency", scale=alt.Scale(zero=True)),
+                                    tooltip=[alt.Tooltip('count()', title='Count')]
+                                )
+                                .properties(title=f"Distribution of {col}", width='container')
+                            )
+                            st.altair_chart(chart, use_container_width=True)
+                        else:
+                            # Explicit interior edges across central 95%
+                            edges = np.linspace(p_low, p_high, interior_bins + 1)
+                            interior_vals = vals[(vals >= p_low) & (vals <= p_high)]
+                            counts, _ = np.histogram(interior_vals, bins=edges)
+                            below = int((vals < p_low).sum())
+                            above = int((vals > p_high).sum())
+
+                            # Assemble bins df (avoid +/-inf; use one width outside range)
+                            rows = []
+                            # Left catch-all
+                            rows.append({
+                                'bin_start': float(edges[0] - width),
+                                'bin_end': float(edges[0]),
+                                'count': below,
+                                'is_tail': True
+                            })
+                            # Interior bins
+                            for i_b in range(interior_bins):
+                                b_start = float(edges[i_b])
+                                b_end = float(edges[i_b + 1])
+                                rows.append({
+                                    'bin_start': b_start,
+                                    'bin_end': b_end,
+                                    'count': int(counts[i_b]),
+                                    'is_tail': False
+                                })
+                            # Right catch-all
+                            rows.append({
+                                'bin_start': float(edges[-1]),
+                                'bin_end': float(edges[-1] + width),
+                                'count': above,
+                                'is_tail': True
+                            })
+
+                            bins_df = pd.DataFrame(rows)
+                            if n > 0:
+                                bins_df['pct'] = bins_df['count'] / n
+                            else:
+                                bins_df['pct'] = 0.0
+
+                            # Ensure non-negative counts and compute a stable y-axis max
+                            bins_df['count'] = bins_df['count'].clip(lower=0)
+                            max_count = max(1, int(bins_df['count'].max()))
+
+                            chart = (
+                                alt.Chart(bins_df)
+                                .mark_bar(orient='vertical')
+                                .encode(
+                                    x=alt.X('bin_start:Q', title='Value'),
+                                    x2='bin_end:Q',
+                                    y=alt.Y('count:Q', title='Frequency', scale=alt.Scale(domain=[0, max_count * 1.05])),
+                                    y2=alt.value(0),
+                                    color=alt.condition('datum.is_tail', alt.value('#A0A0A0'), alt.value(feature_color)),
+                                    tooltip=[
+                                        alt.Tooltip('bin_start:Q', title='Bin start', format=',.3f'),
+                                        alt.Tooltip('bin_end:Q', title='Bin end', format=',.3f'),
+                                        alt.Tooltip('count:Q', title='Count', format=','),
+                                        alt.Tooltip('pct:Q', title='% of total', format='.2%')
+                                    ]
+                                )
+                                .properties(title=f"Distribution of {col}", width='container')
+                            )
+                            st.altair_chart(chart, use_container_width=True)
 
     elif analysis_type == "Correlation matrix":
         non_numeric_fields = [f for f in selected_features if inferred_types.get(f) != "numeric"]
@@ -580,32 +833,39 @@ if run_analysis and st.session_state.get("file_loaded", False) and st.session_st
     elif analysis_type == "Linear Regression":
         st.markdown("## Linear Regression")
 
-        non_numeric = [f for f in selected_features if inferred_types.get(f) != "numeric"]
-        if non_numeric:
-            st.error(f"All selected features must be numeric. The following are not: {', '.join(non_numeric)}")
-        elif len(selected_features) < 2:
-            st.warning("Please select at least two numeric features (1 dependent + ≥1 independent).")
-        elif dependent_var not in selected_features:
+        if dependent_var not in selected_features:
             st.error("Dependent variable must be one of the selected fields.")
+        elif inferred_types.get(dependent_var) != "numeric":
+            st.error("Dependent variable must be numeric for linear regression.")
         else:
-            X_cols = [col for col in selected_features if col != dependent_var]
-            if len(X_cols) > 8:
+            # Filter independent vars to numeric only; warn about skipped non-numeric
+            numeric_indep = [f for f in selected_features if f != dependent_var and inferred_types.get(f) == "numeric"]
+            skipped_indep = [f for f in selected_features if f != dependent_var and f not in numeric_indep]
+            if skipped_indep:
+                st.warning("Skipping non-numeric independent variables: " + ", ".join(skipped_indep))
+
+            if len(numeric_indep) < 1:
+                st.warning("Please select at least one numeric independent variable.")
+            elif len(numeric_indep) > 8:
                 st.error("You can include up to 8 independent variables in the regression.")
             else:
-                data = df[[dependent_var] + X_cols].dropna()
+                cols_used = [dependent_var] + numeric_indep
+                data = df[cols_used].dropna()
+
                 warn_fields = []
-                for col in [dependent_var] + X_cols:
+                for col in cols_used:
                     ratio = df[col].isna().mean()
                     if ratio > 0.2:
                         warn_fields.append((col, ratio))
                 if warn_fields:
                     st.warning("Some fields used in this regression have high missing values:\n" +
                                "\n".join([f"{col}: {ratio:.0%} missing" for col, ratio in warn_fields]))
-                X = sm.add_constant(data[X_cols])
+
+                X = sm.add_constant(data[numeric_indep])
                 y = data[dependent_var]
                 model = sm.OLS(y, X).fit()
 
-                eqn_parts = [f"{model.params[name]:.4f} × {name}" for name in X_cols]
+                eqn_parts = [f"{model.params[name]:.4f} × {name}" for name in numeric_indep]
                 intercept = model.params["const"] if "const" in model.params else 0
                 equation_latex = f"$ {dependent_var} = {intercept:.4f} + " + " + ".join(eqn_parts) + " $"
                 st.markdown("### Regression Equation")
@@ -622,21 +882,21 @@ if run_analysis and st.session_state.get("file_loaded", False) and st.session_st
                 st.dataframe(summary_df)
 
                 st.markdown(f"**R²:** {model.rsquared:.4f}")
-                if len(X_cols) > 1:
+                if len(numeric_indep) > 1:
                     st.markdown(f"**Adjusted R²:** {model.rsquared_adj:.4f}")
 
-                if len(X_cols) == 1:
+                if len(numeric_indep) == 1:
                     st.markdown("### Regression Plot")
-                    x_vals = data[X_cols[0]]
+                    x_vals = data[numeric_indep[0]]
                     y_vals = y
                     y_pred = model.predict(X)
 
                     fig, ax = plt.subplots()
                     ax.scatter(x_vals, y_vals, alpha=0.6, label="Data")
                     ax.plot(x_vals, y_pred, color="red", label="Regression Line")
-                    ax.set_xlabel(X_cols[0])
+                    ax.set_xlabel(numeric_indep[0])
                     ax.set_ylabel(dependent_var)
-                    ax.set_title(f"{dependent_var} vs {X_cols[0]}")
+                    ax.set_title(f"{dependent_var} vs {numeric_indep[0]}")
                     ax.legend()
                     ax.grid(True, linestyle="--", alpha=0.5)
                     st.pyplot(fig)
@@ -741,44 +1001,146 @@ if run_analysis and st.session_state.get("file_loaded", False) and st.session_st
         if not valid_x_fields:
             st.warning("Line charts require a time-based x-axis. No datetime or t-index fields were found.")
         elif run_analysis:
-            y_fields = [f for f in selected_features if inferred_types.get(f) == "numeric"]
-            if not y_fields:
-                st.warning("No numeric features selected for the Y-axis.")
+            # Build filtered dataframe according to selected filter controls
+            df_filt = df.copy()
+            if x_field and x_field in df_filt.columns:
+                if inferred_types.get(x_field) == "datetime" and not x_field.startswith("t - "):
+                    x_nonnull = df_filt[x_field].dropna()
+                    if not x_nonnull.empty:
+                        xmin = x_nonnull.min().date()
+                        xmax = x_nonnull.max().date()
+                        mode = st.session_state.get("date_filter_mode", "All")
+                        if mode == "All":
+                            start_dt, end_dt = xmin, xmax
+                        elif mode == "YTD":
+                            end_dt = xmax
+                            start_dt = pd.Timestamp(year=end_dt.year, month=1, day=1).date()
+                        elif mode == "Last 7 days":
+                            end_dt = xmax
+                            start_dt = (pd.Timestamp(end_dt) - pd.Timedelta(days=7)).date()
+                        elif mode == "Last 30 days":
+                            end_dt = xmax
+                            start_dt = (pd.Timestamp(end_dt) - pd.Timedelta(days=30)).date()
+                        elif mode == "Last 90 days":
+                            end_dt = xmax
+                            start_dt = (pd.Timestamp(end_dt) - pd.Timedelta(days=90)).date()
+                        elif mode == "Last 365 days":
+                            end_dt = xmax
+                            start_dt = (pd.Timestamp(end_dt) - pd.Timedelta(days=365)).date()
+                        elif mode == "Custom":
+                            start_dt, end_dt = st.session_state.get("date_filter_range", (xmin, xmax))
+                        else:
+                            start_dt, end_dt = xmin, xmax
+                        mask = df_filt[x_field].dt.date.between(start_dt, end_dt)
+                        df_filt = df_filt.loc[mask]
+                else:
+                    # t-index / numeric x_field
+                    tmin, tmax = st.session_state.get("t_filter_range", (None, None))
+                    if tmin is not None and tmax is not None:
+                        mask = df_filt[x_field].between(tmin, tmax)
+                        df_filt = df_filt.loc[mask]
+
+            if df_filt.empty:
+                st.warning("No data in the selected range.")
             else:
-                if len(y_fields) > 6:
-                    st.warning("More than 6 numeric features selected. Only the first 6 will be shown.")
-                    y_fields = y_fields[:6]
-                for i, y_field in enumerate(y_fields):
-                    # Defensive: skip if not in df
-                    if x_field not in df.columns or y_field not in df.columns:
-                        continue
-                    chart_df = df[[x_field, y_field]].dropna()
-                    if chart_df.empty:
-                        st.warning(f"Skipping '{y_field}' due to missing values.")
-                        continue
-                    chart_df = chart_df.sort_values(by=x_field)
-                    if i % 2 == 0:
-                        col_left, col_right = st.columns([1, 1])
-                    target_col = col_left if i % 2 == 0 else col_right
-                    with target_col:
-                        fig, ax = plt.subplots()
-                        ax.plot(chart_df[x_field], chart_df[y_field], marker='o', linewidth=1.5)
-                        ax.set_title(f"{y_field} over {x_field}")
-                        ax.set_xlabel(x_field)
-                        ax.set_ylabel(y_field)
-                        ax.grid(True, linestyle="--", alpha=0.5)
-                        # Improved x-axis date formatting
-                        # Only format as datetime if it's a real datetime field and not a t-index
-                        if np.issubdtype(chart_df[x_field].dtype, np.datetime64) and not x_field.startswith("t - "):
-                            num_days = (chart_df[x_field].max() - chart_df[x_field].min()).days
-                            if num_days > 1500:
-                                ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
-                            elif num_days > 90:
-                                ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %Y'))
+                y_fields = [f for f in selected_features if inferred_types.get(f) == "numeric"]
+                if not y_fields:
+                    st.warning("No numeric features selected for the Y-axis.")
+                else:
+                    # Check if the guided grouping is enabled and valid
+                    enable_group = st.session_state.get("enable_group_line", False)
+                    group_by_col = st.session_state.get("group_by_col", None)
+                    # selected_categories = st.session_state.get("group_category_values", []) # No longer used
+
+                    if enable_group and group_by_col and group_by_col in df_filt.columns:
+                        # Determine aggregation function
+                        agg_method = st.session_state.get("line_agg_method", "Mean")
+                        agg_fn = "sum" if agg_method == "Sum" else "mean"
+                        cat_mode = st.session_state.get("line_category_mode", "All categories (aggregate)")
+                        # selected_category = st.session_state.get("line_selected_category", None)
+                        selected_categories = st.session_state.get("line_selected_categories", [])
+
+                        if len(y_fields) > 6:
+                            st.warning("More than 6 numeric features selected. Only the first 6 will be shown.")
+                            y_fields = y_fields[:6]
+
+                        for i, y_field in enumerate(y_fields):
+                            # Prepare data per measure
+                            work_df = df_filt[[x_field, group_by_col, y_field]].dropna()
+                            if work_df.empty:
+                                st.warning(f"No data for '{y_field}' after filtering.")
+                                continue
+
+                            if cat_mode == "Pick a category" and selected_categories:
+                                # Filter to chosen categories; aggregate duplicates on the same x per category
+                                sub = work_df[work_df[group_by_col].astype(str).isin([str(v) for v in selected_categories])]
+                                if sub.empty:
+                                    st.warning("No rows for the selected categories in '{y_field}'.")
+                                    continue
+                                agg_df = sub.groupby([x_field, group_by_col], as_index=False)[y_field].agg(agg_fn)
+                                title_suffix = f"for selected {group_by_col} values"
                             else:
-                                ax.xaxis.set_major_formatter(mdates.DateFormatter('%d-%b'))
-                            fig.autofmt_xdate()
-                        st.pyplot(fig)
+                                # Aggregate across all categories per x
+                                agg_df = work_df.groupby([x_field], as_index=False)[y_field].agg(agg_fn)
+                                title_suffix = "(All categories)"
+
+                            agg_df = agg_df.sort_values(by=x_field)
+
+                            # Layout two charts per row like before
+                            if i % 2 == 0:
+                                col_left, col_right = st.columns([1, 1])
+                            target_col = col_left if i % 2 == 0 else col_right
+                            with target_col:
+                                # Determine Altair types
+                                x_type = 'temporal' if (np.issubdtype(agg_df[x_field].dtype, np.datetime64) and not x_field.startswith("t - ")) else 'quantitative'
+                                base = alt.Chart(agg_df).mark_line(point=True).encode(
+                                    x=alt.X(x_field, type=x_type, title=x_field),
+                                    y=alt.Y(y_field, type='quantitative', title=y_field)
+                                ).properties(
+                                    title=f"{y_field} over {x_field} {title_suffix}",
+                                    width='container'
+                                )
+                                if (cat_mode == "Pick a category" and selected_categories) and (group_by_col in agg_df.columns):
+                                    chart = base.encode(
+                                        color=alt.Color(
+                                            group_by_col,
+                                            legend=alt.Legend(
+                                                orient="right",
+                                                direction="vertical",
+                                                columns=1
+                                            )
+                                        )
+                                    )
+                                else:
+                                    chart = base.encode(color=alt.value('steelblue'))
+                                st.altair_chart(chart, use_container_width=True)
+                    else:
+                        # Original behavior: multiple numeric series in columns plotted against x_field
+                        if len(y_fields) > 6:
+                            st.warning("More than 6 numeric features selected. Only the first 6 will be shown.")
+                            y_fields = y_fields[:6]
+                        for i, y_field in enumerate(y_fields):
+                            if x_field not in df_filt.columns or y_field not in df_filt.columns:
+                                continue
+                            chart_df = df_filt[[x_field, y_field]].dropna()
+                            if chart_df.empty:
+                                st.warning(f"Skipping '{y_field}' due to missing values.")
+                                continue
+                            chart_df = chart_df.sort_values(by=x_field)
+                            if i % 2 == 0:
+                                col_left, col_right = st.columns([1, 1])
+                            target_col = col_left if i % 2 == 0 else col_right
+                            with target_col:
+                                x_type = 'temporal' if (np.issubdtype(chart_df[x_field].dtype, np.datetime64) and not x_field.startswith("t - ")) else 'quantitative'
+                                chart = alt.Chart(chart_df).mark_line(point=True).encode(
+                                    x=alt.X(x_field, type=x_type, title=x_field),
+                                    y=alt.Y(y_field, type='quantitative', title=y_field),
+                                    color=alt.value('steelblue')
+                                ).properties(
+                                    title=f"{y_field} over {x_field}",
+                                    width='container'
+                                )
+                                st.altair_chart(chart, use_container_width=True)
 
     elif analysis_type == "Box Plot":
         st.markdown("### Box Plot")

@@ -436,7 +436,6 @@ if st.session_state.get("file_loaded", False):
             sankey_levels = st.multiselect(
                 "Select 2–5 level columns (left → right order)",
                 options=sankey_level_candidates,
-                default=st.session_state.get("sankey_levels", [])[:5],
                 key="sankey_levels",
                 help="Choose categorical columns. Order of selection becomes the flow order."
             )
@@ -481,16 +480,16 @@ if st.session_state.get("file_loaded", False):
                 except Exception:
                     level_uniqs = []
 
-                # Sanitize defaults so they are a subset of options
+                # Sanitize session state so it only contains valid options
                 st.session_state.setdefault("sankey_slicer_values", [])
                 current_defaults = st.session_state.get("sankey_slicer_values", [])
                 option_set = set(level_uniqs)
-                valid_default = [v for v in current_defaults if str(v) in option_set]
+                # Ensure session state contains only valid options
+                st.session_state["sankey_slicer_values"] = [v for v in current_defaults if str(v) in option_set]
 
                 slicer_values = st.multiselect(
                     f"Show only rows where **{slicer_level}** is:",
                     options=level_uniqs,
-                    default=valid_default,
                     key="sankey_slicer_values"
                 )
             else:
@@ -996,19 +995,46 @@ if run_analysis and st.session_state.get("file_loaded", False) and st.session_st
 
                 if len(numeric_indep) == 1:
                     st.markdown("### Regression Plot")
-                    x_vals = data[numeric_indep[0]]
+                    xname = numeric_indep[0]
+                    x_vals = data[xname]
                     y_vals = y
                     y_pred = model.predict(X)
 
-                    fig, ax = plt.subplots()
-                    ax.scatter(x_vals, y_vals, alpha=0.6, label="Data")
-                    ax.plot(x_vals, y_pred, color="red", label="Regression Line")
-                    ax.set_xlabel(numeric_indep[0])
-                    ax.set_ylabel(dependent_var)
-                    ax.set_title(f"{dependent_var} vs {numeric_indep[0]}")
-                    ax.legend()
-                    ax.grid(True, linestyle="--", alpha=0.5)
-                    st.pyplot(fig)
+                    reg_df = pd.DataFrame({
+                        xname: pd.to_numeric(x_vals, errors='coerce'),
+                        dependent_var: pd.to_numeric(y_vals, errors='coerce'),
+                        'Predicted': pd.to_numeric(y_pred, errors='coerce'),
+                    }).dropna().sort_values(by=xname)
+
+                    scatter = (
+                        alt.Chart(reg_df)
+                        .mark_circle(opacity=0.6, color="steelblue")
+                        .encode(
+                            x=alt.X(f"{xname}:Q", title=xname),
+                            y=alt.Y(f"{dependent_var}:Q", title=dependent_var),
+                            tooltip=[
+                                alt.Tooltip(f"{xname}:Q", title=xname, format=",.3f"),
+                                alt.Tooltip(f"{dependent_var}:Q", title=dependent_var, format=",.3f"),
+                                alt.Tooltip("Predicted:Q", title="Predicted", format=",.3f"),
+                            ],
+                        )
+                    )
+
+                    line = (
+                        alt.Chart(reg_df)
+                        .mark_line(color="red")
+                        .encode(
+                            x=alt.X(f"{xname}:Q", title=xname),
+                            y=alt.Y("Predicted:Q", title=dependent_var),
+                        )
+                    )
+
+                    chart = (scatter + line).properties(
+                        title=f"{dependent_var} vs {xname} (Regression)",
+                        width='container',
+                        height=600
+                    )
+                    st.altair_chart(chart, use_container_width=True)
 
     elif analysis_type == "Clustering":
         st.markdown("## K-Means Clustering")
@@ -1109,13 +1135,22 @@ if run_analysis and st.session_state.get("file_loaded", False) and st.session_st
 
                 with right_col:
                     st.markdown(f"### Frequency Plot: {col}")
-                    fig, ax = plt.subplots()
-                    ax.barh(freq_data[col].astype(str), freq_data["Count"], color=plt.cm.tab10(i % 10))
-                    ax.set_xlabel("Count")
-                    ax.set_ylabel("Value")
-                    ax.invert_yaxis()
-                    ax.set_title(f"Top Values in '{col}'")
-                    st.pyplot(fig)
+                    # Altair horizontal bar chart, sorted by count descending
+                    chart = (
+                        alt.Chart(freq_data)
+                        .mark_bar()
+                        .encode(
+                            y=alt.Y(f"{col}:N", sort='-x', title="Value"),
+                            x=alt.X("Count:Q", title="Count", scale=alt.Scale(zero=True)),
+                            tooltip=[
+                                alt.Tooltip(f"{col}:N", title="Value"),
+                                alt.Tooltip("Count:Q", title="Count", format=","),
+                                alt.Tooltip("Percentage:Q", title="% of total", format=".2f")
+                            ]
+                        )
+                        .properties(title=f"Top Values in '{col}'", width='container')
+                    )
+                    st.altair_chart(chart, use_container_width=True)
 
     elif analysis_type == "Line Chart":
         st.markdown("## Line Charts")

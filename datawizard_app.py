@@ -224,14 +224,17 @@ with st.sidebar:
             st.warning("Please enter a token before submitting.")
 
 # ---------- Main Layout ----------
-st.title("DataWizard")
-st.subheader("Upload your data to begin analysis")
-st.write(
-    "This tool lets you upload a CSV or Excel file and quickly view summary statistics, charts, distributions, run regressions, cluster your data, and more. "
-    "You can upload your file using the button below or import data by entering a FileHub token."
-)
+tabs = st.tabs(["Analysis", "Preferences"])
 
-main_file = st.file_uploader("Upload your file here", type=["csv", "xls", "xlsx"], key="main")
+# --- Analysis Tab: Title, Description, Uploader ---
+with tabs[0]:
+    st.title("DataWizard")
+    st.subheader("Upload your data to begin analysis")
+    st.write(
+        "This tool lets you upload a CSV or Excel file and quickly view summary statistics, charts, distributions, run regressions, cluster your data, and more. "
+        "You can upload your file using the button below or import data by entering a FileHub token."
+    )
+    main_file = st.file_uploader("Upload your file here", type=["csv", "xls", "xlsx"], key="main")
 
  # ---------- File Selection Logic (uploaded file or FileHub) ----------
 # Uploaded file always takes precedence over file loaded via transfer token
@@ -354,6 +357,11 @@ if st.session_state.get("file_loaded", False):
             st.markdown(f"**Rows:** {file_info['rows']}")
             st.markdown(f"**Columns:** {file_info['cols']}")
             st.markdown(f"**Missing Fields:** {file_info['missing']}")
+
+    # --- Top-level tabs (default to Analysis) ---
+    with tabs[1]:
+        st.markdown("### Preferences")
+        st.info("Settings & preferences will appear here.")
 
     left_col, right_col = st.columns([1, 1])
     with left_col:

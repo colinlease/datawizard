@@ -1,6 +1,10 @@
 import pandas as pd
 import numpy as np
 import streamlit as st
+st.set_page_config(
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 import os
 
 #FileHub imports for transfer functionality
@@ -184,7 +188,6 @@ def evaluate_data_cleanliness(df, inferred_types):
     elif missing_ratio > 0.5 and len(datetime_cols) == 0:
         messages.append("Unable to determine clear structure. File may need reformatting before use.")
     return messages[:2]
-import streamlit as st
 import matplotlib.pyplot as plt
 import statsmodels.api as sm
 from collections import Counter
@@ -193,10 +196,6 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 import matplotlib.dates as mdates
 import altair as alt
-
-st.set_page_config(layout="wide")
-
-
 
 
 with st.sidebar:
@@ -566,8 +565,6 @@ if st.session_state.get("file_loaded", False):
                         st.session_state["line_agg_method"] = None
                         st.session_state["line_selected_categories"] = []
                         st.session_state["line_selected_category"] = None
-        # "Run Analysis" button now appears after axis selection / dependent var
-        run_analysis = st.button("Run Analysis")
         # Clustering k
         cluster_k = None
         if analysis_type == "Clustering":
@@ -578,6 +575,9 @@ if st.session_state.get("file_loaded", False):
                 index=1,
                 key="cluster_dropdown"
             )
+
+        # "Run Analysis" button now appears after axis selection / dependent var
+        run_analysis = st.button("Run Analysis")
         # Box plot group col and outliers
         group_col = None
         show_outliers = None
@@ -942,17 +942,30 @@ if run_analysis and st.session_state.get("file_loaded", False) and st.session_st
                 pca_df["Cluster Name"] = pca_df["Cluster"].apply(lambda x: f"Cluster {x}")
 
                 st.markdown("### 2D PCA Scatter Plot (Clusters)")
-                fig, ax = plt.subplots()
-                for name in pca_df["Cluster Name"].unique():
-                    subset = pca_df[pca_df["Cluster Name"] == name]
-                    ax.scatter(subset["PC1"], subset["PC2"], label=name, alpha=0.7)
-
-                ax.set_xlabel("Principal Component 1")
-                ax.set_ylabel("Principal Component 2")
-                ax.set_title("K-Means Clustering Results (PCA)")
-                ax.legend()
-                ax.grid(True, linestyle="--", alpha=0.5)
-                st.pyplot(fig)
+                # Altair interactive scatter: one point per row, colored by cluster
+                chart = (
+                    alt.Chart(pca_df)
+                    .mark_circle(opacity=0.7)
+                    .encode(
+                        x=alt.X('PC1:Q', title='Principal Component 1'),
+                        y=alt.Y('PC2:Q', title='Principal Component 2'),
+                        color=alt.Color(
+                            'Cluster Name:N',
+                            legend=alt.Legend(orient="right", direction="vertical", columns=1)
+                        ),
+                        tooltip=[
+                            alt.Tooltip('Cluster Name:N', title='Cluster'),
+                            alt.Tooltip('PC1:Q', title='PC1', format=',.3f'),
+                            alt.Tooltip('PC2:Q', title='PC2', format=',.3f')
+                        ]
+                    )
+                    .properties(
+                        title='K-Means Clustering Results (PCA)',
+                        width='container',
+                        height=800
+                    )
+                )
+                st.altair_chart(chart, use_container_width=True)
 
             except Exception as e:
                 st.error(f"Error during clustering: {e}")

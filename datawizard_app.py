@@ -245,8 +245,8 @@ if uploaded_file is not None:
                 df = pd.read_csv(uploaded_file)
             else:
                 df = pd.read_excel(uploaded_file)
-            if df.shape[0] > 75000:
-                st.error("File exceeds 75,000 row limit. Please upload a smaller file.")
+            if df.shape[0] > 250000:
+                st.error("File exceeds 250,000 row limit. Please upload a smaller file.")
             else:
                 # Clear all prior file-related session state to allow full overwrite
                 st.session_state.pop("df", None)
